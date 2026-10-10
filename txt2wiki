@@ -1,0 +1,169 @@
+#! /usr/bin/awk -f
+
+# Program: txt2wiki
+#    Date: 20-Apr-2026
+# Descrip: A utility using awk to convert text files with tables and lists to DokuWiki.md files.
+
+
+BEGIN { spaces = "      ";
+        mode = "text"; 
+        code = 0;
+        lines = 0;
+        print }
+
+# Print horizontal line.
+/^--$/ {
+    if (code) {
+        printf("</code>");
+        code = 0; }
+
+    if (mode == "list")
+        printf("\n\n-----\n");
+    else
+        printf("\n-----\n");
+
+    mode = "text";
+    next }
+
+# Monitor number of blank lines to switch from list to text mode.
+length($0) == 0 { # Skip blank lines.
+    lines++;
+
+    # After 2 blank lines, print line feed.
+    if (lines == 2 && mode == "text") 
+        printf("\n"); 
+    next }
+
+# Print section title.
+/Title:/ { 
+    $1 = ""; 
+    printf("======%s ======\n\n",$0); 
+    lines = 0;
+    mode = "text" }
+
+# Ignore these fields.
+/Date:|Tags:/ { 
+    lines = 0;
+    next }
+
+# Print non-list item, ie. regular text line.
+/^[A-Z]/ {
+    # If previous line contained code, print closing statement.
+    if (code) {
+        printf("</code>");
+        code = 0; }
+
+    # If previous line was part of a list, print CR followed by one LF.
+    if (mode == "list")
+        printf("\n\n");
+
+    # Print non-list item with CR. 
+    printf("%s\n", $0);
+
+    lines = 0;
+    mode = "text";
+    next }
+
+# Since the vertical position of the next line in a list is affected by the control codes 
+# at the end of the previous line, special care is made to adjust these control codes, and
+# only generate them once we have read the next line to deterine which codes to use. Doing 
+# so allows us to maintin consistent vertical line spacing within the list.
+
+# Determine index level in the list for this item.
+/^ */ { 
+    match($0, /[^ ]/); 
+    indent = int((RSTART - 1) / 3) * 2 + 2; }
+
+# Ordered list.
+/^ *[0-9]+\.|^[ ]*[a-z]+\)/ {
+    # Close out any prior code statements.
+    if (code) {
+        printf("</code>\n");
+        code = 0; }
+    else
+    # Add linefeed between list indexes by adding "\\ \\ " to the end of each line.
+    if (mode == "list") {
+        if (code_lines)
+            printf("%s\n", "\\\\ ");
+        else
+            printf("%s\n", "\\\\ \\\\ "); }
+
+    # Replace index with DokuWiki notation.
+    $1 = "-"; 
+    printf("%s%s", substr(spaces, 1, indent), $0);
+
+    mode = "list";
+    lines = 0;
+    code_lines = 0;
+    next; }
+
+# Unordered list.
+/^ *- / {
+    # Close out any prior code statements.
+    if (code) {
+        printf("</code>\n");
+        code = 0; }
+    else
+    # Add linefeed between bullets by adding "\\ \\ " to the end of each line.
+    if (mode == "list") {
+        if (code_lines)
+            printf("%s\n", "\\\\ ");
+        else
+            printf("%s\n", "\\\\ \\\\ "); }
+
+    # Replace bullet with DokuWiki notation.
+    $1 = "*"; 
+    printf("%s%s", substr(spaces, 1, indent), $0);
+
+    mode = "list";
+    lines = 0;
+    code_lines = 0;
+    next; }
+
+# Code.
+# /=|#|admin\>|:/ {
+
+/#/ {
+    # Remove the space creating the indent.
+    $1 = $1;
+
+    # Separate multiple lines of code with CR.
+    if (code)
+        printf("\n%s", $0);
+
+    else {
+        # Code statement varies based on number of lines of code
+        # within the same index element in a list.
+        if (code_lines == 0)
+            printf("%s%s", "\\\\ \\\\ <code>", $0);
+
+        if (code_lines > 0)
+            printf("%s%s", "\\\\ <code>", $0); }
+
+    code_lines++; 
+    code = 1; 
+    lines = 0;
+    next; }
+
+# List content, indented to align with list index.
+mode == "list" && indent > 0 {
+    # Remove the space creating the indent.
+    $1 = $1;
+
+    # If this is not a line of code, exit code mode.
+    if (code) {
+        printf("</code>%s", $0);
+        code = 0;
+        lines = 0;
+        next; }
+
+    # Every line following the bullet or index (without code) ends with "\\ ".
+    # The line before code must end with "\\ \\ ".
+    # All lines of code must begin with "\\ " and end with a CR.
+
+    printf("%s%s", "\\\\ ", $0); 
+    lines = 0;
+    next; }
+
+END { printf("\n\n") } 
+
